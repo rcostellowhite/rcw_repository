@@ -1,0 +1,327 @@
+---
+title: "SPM1"
+author: "Reagan Costello-White"
+date: "6/18/2021"
+output:
+  pdf_document: default
+  html_document: default
+---
+# System Performance Measure 1: Length of Time Homeless
+
+## 1) Import SPM Data
+<!-- Importing .xls versions of ART700 reports for each fiscal year -->
+<!-- These are the default files saved by the Service Point ART700 report -->
+<!-- The report for FY19 is split into two excel sheets because there are so many clients -->
+<!-- Adding a column to each dataframe for fiscal year -->
+```{r, results = FALSE, message = FALSE, warning = FALSE}
+library(readxl)
+library(tidyverse)
+library(janitor)
+SPM1_FYTD15 <- read_excel("data/SPM1_FYTD15.xls", 
+  sheet = "Tab B - Detail") %>%
+  clean_names() %>%
+  as_tibble() %>%
+  mutate(client_uid = as.numeric(client_uid),
+         FY = 15)
+SPM1_FYTD16 <- read_excel("data/SPM1_FYTD16.xls", 
+    sheet = "Tab B - Detail") %>%
+  clean_names() %>%
+  as_tibble() %>%
+  mutate(FY = 16)
+SPM1_FYTD17 <- read_excel("data/SPM1_FYTD17.xls", 
+    sheet = "Tab B - Detail") %>%
+  clean_names() %>%
+  as_tibble() %>%
+  mutate(FY = 17)
+SPM1_FYTD18 <- read_excel("data/SPM1_FYTD18.xls", 
+    sheet = "Tab B - Detail") %>%
+  clean_names() %>%
+  as_tibble() %>%
+  mutate(FY = 18)
+SPM1_FYTD19_a <- read_excel("data/SPM1_FYTD19.xls", 
+    sheet = "Tab B - Detail") %>%
+  clean_names() %>%
+  as_tibble() %>%
+  mutate(FY = 19)
+SPM1_FYTD19_b <- read_excel("data/SPM1_FYTD19.xls", 
+    sheet = "Tab B - Detail(1)") %>%
+  clean_names() %>%
+  as_tibble() %>%
+  mutate(FY = 19)
+SPM1_FYTD20 <- read_excel("data/SPM1_FYTD20.xls", 
+    sheet = "Tab B - Detail") %>%
+  clean_names() %>%
+  as_tibble() %>%
+  mutate(FY = 20)
+SPM1_FYTD21 <- read_excel("data/SPM1_FYTD21.xls", 
+    sheet = "Tab B - Detail") %>%
+  clean_names() %>%
+  as_tibble() %>%
+  mutate(FY = 21)
+```
+
+## 2) Import Demographic Data
+<!-- This data was generated using report writer. -->
+<!-- The file includes demographic information on all client and all entry/exits since 2013 -->
+```{r, results = FALSE, message = FALSE, warning = FALSE}
+library(readr)
+demographics_FY13_FYTD21 <- read_csv("data/demographics_FY13_FYTD21.csv") 
+```
+
+## 3) Merge and Clean Data 
+<!--  First I will join together the two FY19 dataframes -->
+<!--  Then I'm going to join all of the ART data into one dataframe -->
+<!--  Then I will join that newly created dataframe with the demographics data -->
+<!--  I will also clean up the variable names -->
+<!--  The resulting dataframe is 293,000 rows of 27 variables -->
+<!--  This is because the dataframe includes multiple rows for some clients -->
+<!--  I will group the data by client_uid and select the first row for each client -->
+```{r, results = FALSE, message = FALSE, warning = FALSE}
+library(tidyverse)
+library(lubridate)
+SPM1_FYTD19_a <- SPM1_FYTD19_a %>%
+  select(-overlap_likely_hmi_error) #### This variable is not in the second sheet of the FY19 report
+SPM1_FYTD19 <- rbind(SPM1_FYTD19_a,setNames(SPM1_FYTD19_b,names(SPM1_FYTD19_a))) %>%
+  mutate(date_move_in = ymd_hms(date_move_in)) #### Only FY19 has date_move_in as a numeric variable
+d_all_FY <- bind_rows(SPM1_FYTD15, SPM1_FYTD16, SPM1_FYTD17,
+                   SPM1_FYTD18, SPM1_FYTD19, SPM1_FYTD20, SPM1_FYTD21)
+d_all <- left_join (d_all_FY, demographics_FY13_FYTD21, by = c("client_uid" = "client_id"))%>%
+  group_by(client_uid) %>%
+  slice(1) %>%
+  arrange(client_uid) %>%
+  mutate(race_f = factor(primary_race),
+         proj_type_f = factor(proj_type),
+         provider_f = factor(provider)) %>%
+  mutate(race_fc = fct_collapse(race_f,
+                                White = "White (HUD)",
+                                "Black or African American"= "Black or African American (HUD)",
+                                Unknown = c("Client refused (HUD)", "Client doesn't know (HUD)",
+                                                 "Data not collected (HUD)"),
+                                Asian = "Asian (HUD)",
+                                "Native Hawaiian or Pacific Islander" = "Native Hawaiian or Other Pacific Islander (HUD)",
+                                "American Indian or Alaska Native" =  "American Indian or Alaska Native (HUD)")) %>%
+  mutate(race_3 = fct_collapse(race_f,
+                               White = "WHite (HUD)",
+                               "Black or African American" = "Black or African American (HUD)",
+                               Unknown = c("Client refused (HUD)", "Client doesn't know (HUD)",
+                                         "Data not collected (HUD)"),
+                               Other = c( "Native Hawaiian or Other Pacific Islander (HUD)",
+                                       "American Indian or Alaska Native (HUD)", "Asian (HUD)"))) %>%
+    mutate(race_2 = fct_collapse(race_f,
+                               White = "WHite (HUD)",
+                               "Black or African American" = "Black or African American (HUD)",
+                               "Other or Unknown" = c("Client refused (HUD)", "Client doesn't know (HUD)",
+                                         "Data not collected (HUD)", "Native Hawaiian or Other Pacific Islander (HUD)",
+                                       "American Indian or Alaska Native (HUD)", "Asian (HUD)"))) %>%
+  mutate(race_n = as.numeric(race_fc)) %>%
+  mutate(entry_adj_base = ymd(entry_adj_base),
+         exit_adj_base = ymd(exit_adj_base),
+         adjusted_cutoff = ymd(adjusted_cutoff)) %>%
+  mutate(entry_exit_interval = interval(entry_adj_base, exit_adj_base),
+         tran_lot_days = time_length(entry_exit_interval, "day")) %>%
+  mutate(tran_lot_sum = sum(tran_lot)) %>%
+  mutate(LOT_h = total_es_sh_th) %>%
+  mutate(end_date_ymd = as.Date(end_date, format = '%Y/%m/%d')) %>%
+  replace_na(list(end_date_ymd = today())) %>%
+  mutate(year = year(end_date_ymd),
+         month = month(end_date_ymd)) %>%
+  mutate(y_m = paste(year, month, sep = "-")) %>%
+  relocate(client_uid, entry_adj_base, exit_adj_base, entry_exit_interval,
+           tran_lot, tran_lot_days, total_es_sh ,total_es_sh_th, LOT_h) 
+summary(d_all$race_2)
+```
+
+## 4) Inspect Data
+```{r, message = FALSE, warning = FALSE}
+library(gt)
+gt_all <- head(d_all)
+gt_all
+```
+## 5) Summarize Data
+<!-- Now we want to look at descriptive statistics for each fiscal year  -->
+```{r, message = FALSE, warning = FALSE}
+library(gt)
+sum_FY <- d_all %>% 
+  group_by(FY) %>%
+  select(client_uid, LOT_h, FY, race_fc, race_f, total_es_sh_th, end_date_ymd, month, year)%>%
+  na.omit()%>%
+  summarise(n = n_distinct(client_uid), 
+            min = min(LOT_h, na.rm = TRUE), 
+            max = max(LOT_h, na.rm = TRUE), 
+            mean = mean(LOT_h, na.rm = TRUE), 
+            median = median(LOT_h, na.rm = TRUE),
+            sd = sd(LOT_h, na.rm = TRUE),
+            sem = sd/sqrt(n()),
+            upper_ci = mean + (1.96 * sem),
+            lower_ci = mean - (1.96 * sem))
+
+gt_FY <- gt(sum_FY) %>%
+  tab_header(title = "Length of Time Homeless by Fiscal Year") %>%
+  fmt_number(columns = 7:10, decimals = 2) %>%
+  fmt_number(columns = 5, decimals = 2) %>%
+  cols_width(upper_ci ~ px(100),
+             lower_ci ~ px(100),
+             sd ~ px(120),
+             n ~ px(50),
+             mean ~ px(100),
+             median ~ px(100),
+             FY ~ px(200)) %>%
+  cols_align(align = "center") %>%
+  cols_label(FY = "Fiscal Year",
+             mean = "Mean",
+             median = "Median",
+             min = "Min",
+             max = "Max",
+             sd = "S. Dev",
+             sem = "SEM",
+             upper_ci = "Upper",
+             lower_ci = "Lower") %>%
+  tab_spanner(label = "95% Confidence Intervals",
+              columns = c(upper_ci, lower_ci))
+
+gt_FY
+```
+<!-- We can also look at Length of Time Homeless for each Month -->
+<!-- This creates a very long table that is difficult to read -->
+```{r, message = FALSE, warning = FALSE}
+library(gt)
+d_all <- d_all %>%
+  group_by(year, month) %>%
+  mutate(mean_y_m = mean(LOT_h, na.rm = TRUE),
+         median_y_m = median(LOT_h, na.rm = TRUE))
+
+sum_month <- d_all %>% 
+  group_by(year, month) %>%
+  select(client_uid, LOT_h, FY, race_fc, race_f, total_es_sh_th,  end_date_ymd, month, year, y_m, mean_y_m, median_y_m)%>%
+  na.omit()%>%
+  summarise(n = n_distinct(client_uid), 
+            min = min(LOT_h, na.rm = TRUE), 
+            max = max(LOT_h, na.rm = TRUE), 
+            mean = mean(LOT_h, na.rm = TRUE), 
+            median = median(LOT_h, na.rm = TRUE),
+            sd = sd(LOT_h, na.rm = TRUE),
+            sem = sd/sqrt(n()),
+            upper_ci = mean + (1.96 * sem),
+            lower_ci = mean - (1.96 * sem))
+
+gt_month <- gt(sum_month) %>%
+  tab_header(title = "Length of Time Homeless by Month") %>%
+  fmt_number(columns = 7:10, decimals = 2) %>%
+  fmt_number(columns = 5, decimals = 2) %>%
+  cols_width(upper_ci ~ px(100),
+             lower_ci ~ px(100),
+             sd ~ px(120),
+             n ~ px(50),
+             mean ~ px(100),
+             median ~ px(100),
+             mean ~ px(200)) %>%
+  cols_align(align = "center") %>%
+  cols_label(year = "Year",
+             month = "Month",
+             mean = "Mean",
+             median = "Median",
+             min = "Min",
+             max = "Max",
+             sd = "S. Dev",
+             sem = "SEM",
+             upper_ci = "Upper",
+             lower_ci = "Lower") %>%
+  tab_spanner(label = "95% Confidence Intervals",
+              columns = c(upper_ci, lower_ci))
+gt_month
+```
+<!-- We can do the same summary by Race -->
+```{r, message = FALSE, warning = FALSE}
+library(gt)
+sum_race <- d_all %>% 
+  group_by(race_fc) %>%
+  select(client_uid, LOT_h, FY, race_fc, race_f, total_es_sh_th, end_date_ymd, month, year)%>%
+  na.omit()%>%
+  summarise(n = n_distinct(client_uid), 
+            min = min(LOT_h, na.rm = TRUE), 
+            max = max(LOT_h, na.rm = TRUE), 
+            mean = mean(LOT_h, na.rm = TRUE), 
+            median = median(LOT_h, na.rm = TRUE),
+            sd = sd(LOT_h, na.rm = TRUE),
+            sem = sd/sqrt(n()),
+            upper_ci = mean + (1.96 * sem),
+            lower_ci = mean - (1.96 * sem))%>%
+  arrange(desc(n))
+
+gt_race <- gt(sum_race) %>%
+  tab_header(title = "Length of Time Homeless by Client Race") %>%
+  fmt_number(columns = 7:10, decimals = 2) %>%
+  fmt_number(columns = 5, decimals = 2) %>%
+  cols_width(upper_ci ~ px(100),
+             lower_ci ~ px(100),
+             sd ~ px(120),
+             n ~ px(50),
+             mean ~ px(100),
+             median ~ px(100),
+             race_fc ~ px(200)) %>%
+  cols_align(align = "center") %>%
+  cols_label(race_fc = "Race",
+             mean = "Mean",
+             median = "Median",
+             min = "Min",
+             max = "Max",
+             sd = "S. Dev",
+             sem = "SEM",
+             upper_ci = "Upper",
+             lower_ci = "Lower") %>%
+  tab_spanner(label = "95% Confidence Intervals",
+              columns = c(upper_ci, lower_ci))
+
+gt_race
+```
+## 6) Plot Data
+<!-- We can now create plots to show the change in Length of Time Homeless by Fiscal Year -->
+<!-- To make the plot a little easier to read, I'm going to filter out some outliers and reduce race to three categories -->
+```{r, message = FALSE, warning = FALSE}
+
+f_all <- d_all %>%
+  filter(between(LOT_h, 1, 300))%>%
+  drop_na(race_3)
+  
+ggplot(data = sum_FY, aes(FY, mean)) + 
+  geom_col()+
+  scale_x_discrete(limits=c(15,16,17,18,19,20,21))+
+  geom_point(data = f_all, aes(FY, LOT_h, color = race_2), 
+             position = position_jitter(width = 0.1),
+             shape = 1,
+             alpha = .7) +
+  geom_errorbar(aes(ymin = lower_ci, ymax = upper_ci,
+                    width = 0.2, )) +
+  geom_errorbar(aes(ymax = median, ymin = median, linetype = "Median Length of Time Homeless")) +
+  labs(title = "Length of Time Homeless By Fiscal Year",
+       x = "Fiscal Year",
+       y = "Days Homeless",
+       col = "Primary Race") +
+  theme_light()
+
+ggsave("LOT_homeless x FY .jpg")
+
+```
+<!-- We can also plot Length of Time Homeless by Month-->
+<!-- First calculate mean and median LOT Homeless for each month, then filter data to make the plot easier to read -->
+```{r, message = FALSE, warning = FALSE}
+
+f_all <- d_all %>%
+  select(client_uid, LOT_h, FY, race_fc, race_n, mean_y_m, end_date_ymd, median_y_m)%>%
+  filter(between(LOT_h, 0, 300)) %>%
+  na.omit()
+
+ggplot(data = f_all, aes(end_date_ymd, median_y_m, color = median_y_m)) +
+  geom_smooth(aes(color=..y..), size=1.5, se=FALSE)  +
+  geom_line(size = 0.9)+
+  scale_x_date(date_labels = "%y",
+               date_breaks = "1 year")+
+  scale_colour_gradient2(low = "green4", mid = "goldenrod1" , high = "darkred", 
+                         midpoint= 100) +
+  labs(title = "Average Length of Time Homeless By Month",
+       x = "Month and Year",
+       y = "Days Homeless",
+       color = "Median 
+       Days Homeless") +
+  theme_bw()
+```
